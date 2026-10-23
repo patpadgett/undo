@@ -28,7 +28,7 @@ assert 'chmod restores 644' '[[ $(stat -c %a dest) == 644 ]]'
 mkdir newdir; undo -y >/dev/null
 assert 'mkdir undone' '[[ ! -e newdir ]]'
 assert 'undo list' '[[ $(undo -l 3) == *undone* ]]'
-mv missing notcreated 2>/dev/null; rc=$?
+mv dest missing/ 2>/dev/null; rc=$?
 assert 'failure exit propagates' '[[ $rc -ne 0 ]]'
 assert 'failed command not undone' '[[ $(undo -l 1) == *failed* ]]'
 assert 'no done entry remains' '! undo -y >/dev/null 2>&1'
@@ -46,5 +46,26 @@ rm -f absent
 assert 'rm -f ignores missing' '[[ $? == 0 ]]'
 rm tree 2>/dev/null; rc=$?
 assert 'rm refuses directory' '[[ $rc -eq 1 && -d tree ]]'
+command mkdir -p safety/inner
+( cd safety/inner && rm -rf .. >/dev/null 2>&1 ); rc=$?
+assert 'rm refuses dotdot operand' '[[ $rc -eq 1 && -d safety/inner ]]'
+command mkdir -p bypass-root/inner
+rm -rf --no-preserve-root bypass-root 2>/dev/null; rc=$?
+assert 'rm refuses unsafe unjournaled fallback' '[[ $rc -ne 0 && -d bypass-root/inner ]]'
+command mkdir existing-dir
+mkdir -p existing-dir
+mkdir real-new-dir
+undo -y >/dev/null
+assert 'no-op entry does not mask previous undo' '[[ ! -e real-new-dir && -d existing-dir ]]'
+printf archive > archsrc
+cp -a archsrc archdst
+undo -y >/dev/null
+assert 'cp -a is journaled and undone' '[[ ! -e archdst && -f archsrc ]]'
+command mkdir -p recdir
+printf saved > recdir/file
+rm -r recdir missing-operand 2>/dev/null; rc=$?
+assert 'partial rm returns failure' '[[ $rc -ne 0 && ! -e recdir ]]'
+undo --recover -y >/dev/null
+assert 'failed rm can be recovered' '[[ -f recdir/file ]]'
 printf 'Integration failures: %s\n' "$failures"
 [[ $failures -eq 0 ]]

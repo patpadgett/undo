@@ -5,12 +5,35 @@ if [ -z "${UNDO_PY:-}" ]; then
     unset _undo_source
 fi
 
+_undo_rm_unsafe() {
+    local _undo_arg _undo_tail
+    for _undo_arg in "$@"; do
+        case $_undo_arg in
+            --) continue ;;
+            --no-preserve-root|--preserve-root=no) return 0 ;;
+            --*|-?*) continue ;;
+        esac
+        _undo_tail=${_undo_arg%/}
+        case ${_undo_tail##*/} in
+            .|..) return 0 ;;
+        esac
+        case $_undo_tail in
+            ''|/|//*|"${PWD:-/}"|"${UNDO_HOME:-${HOME:-}/.undo}") return 0 ;;
+        esac
+    done
+    return 1
+}
+
 _undo_wrap() {
     local _undo_cmd="$1" _undo_id='' _undo_rc=0
     shift
     if [ "${UNDO_DISABLE:-0}" = 1 ]; then
         command "$_undo_cmd" "$@"
         return $?
+    fi
+    if [ "$_undo_cmd" = rm ] && _undo_rm_unsafe "$@"; then
+        printf '%s\n' 'undo: refusing unsafe rm operand or --no-preserve-root' >&2
+        return 1
     fi
     if [ ! -r "$UNDO_PY" ] || ! command -v python3 >/dev/null 2>&1; then
         printf '%s\n' 'undo: not journaled (engine unavailable)' >&2
@@ -38,7 +61,9 @@ _undo_wrap() {
         _undo_rc=$?
     fi
     if [ -n "$_undo_id" ]; then
-        command python3 "$UNDO_PY" commit "$_undo_id" "$_undo_rc" || :
+        if ! command python3 "$UNDO_PY" commit "$_undo_id" "$_undo_rc"; then
+            printf 'undo: journal commit failed for %s; the command completed but may not be undoable\n' "$_undo_id" >&2
+        fi
     fi
     return "$_undo_rc"
 }
